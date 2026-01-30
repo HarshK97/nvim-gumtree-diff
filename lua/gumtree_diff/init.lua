@@ -24,6 +24,24 @@ function M.diff(args)
 
 	mappings = core.bottom_up_match(mappings, src_info, dst_info)
 	print("Total mappings after Bottom-up: " .. #mappings)
+
+	M.print_mappings(mappings, src_info, dst_info, buf1, buf2)
+end
+
+function M.print_mappings(mappings, src_info, dst_info, buf1, buf2)
+	print("\n=== Function and Variable Mappings ===")
+	for _, m in ipairs(mappings) do
+		local src = src_info[m.src]
+		local dst = dst_info[m.dst]
+		if src and dst then
+			if src.type == "function_declaration" or src.type == "variable_declaration" then
+				local src_text = vim.treesitter.get_node_text(src.node, buf1):sub(1, 50)
+				local dst_text = vim.treesitter.get_node_text(dst.node, buf2):sub(1, 50)
+				print(string.format("%s: '%s' -> '%s'", src.type, src_text, dst_text))
+			end
+		end
+	end
+	print("===================================\n")
 end
 
 return M
