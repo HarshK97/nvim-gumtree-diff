@@ -59,4 +59,46 @@ function M.top_down_match(src_root, dst_root, src_buf, dst_buf)
 	return mappings, src_info, dst_info
 end
 
+function M.bottom_up_match(mappings, src_info, dst_info)
+	local function is_mapped(id, is_src)
+		for _, m in ipairs(mappings) do
+			if is_src and m.src == id then
+				return true
+			end
+			if not is_src and m.dst == id then
+				return true
+			end
+		end
+		return false
+	end
+	local function get_mapping(id, is_src)
+		for _, m in ipairs(mappings) do
+			if is_src and m.src == id then
+				return m
+			end
+			if not is_src and m.dst == id then
+				return m
+			end
+		end
+		return nil
+	end
+
+	for id, info in pairs(src_info) do
+		if not is_mapped(id, true) and info.parent then
+			local m = get_mapping(info.parent:id(), true)
+			if m then
+				local d_parent = dst_info[m.dst].node
+				for child in d_parent:iter_children() do
+					if not is_mapped(child:id(), false) and child:type() == info.type then
+						table.insert(mappings, { src = id, dst = child:id() })
+						break
+					end
+				end
+			end
+		end
+	end
+
+	return mappings
+end
+
 return M
