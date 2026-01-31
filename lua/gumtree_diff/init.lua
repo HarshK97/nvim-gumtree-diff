@@ -22,7 +22,7 @@ function M.diff(args)
 	local mappings, src_info, dst_info = core.top_down_match(root1, root2, buf1, buf2)
 	print("Top-down mappings: " .. #mappings)
 
-	mappings = core.bottom_up_match(mappings, src_info, dst_info)
+	mappings = core.bottom_up_match(mappings, src_info, dst_info, root1, root2, buf1, buf2)
 	print("Total mappings after Bottom-up: " .. #mappings)
 
 	M.print_mappings(mappings, src_info, dst_info, buf1, buf2)

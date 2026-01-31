@@ -59,7 +59,7 @@ function M.top_down_match(src_root, dst_root, src_buf, dst_buf)
 	return mappings, src_info, dst_info
 end
 
-function M.bottom_up_match(mappings, src_info, dst_info)
+function M.bottom_up_match(mappings, src_info, dst_info, src_root, dst_root, src_buf, dst_buf)
 	local function is_mapped(id, is_src)
 		for _, m in ipairs(mappings) do
 			if is_src and m.src == id then
@@ -83,15 +83,87 @@ function M.bottom_up_match(mappings, src_info, dst_info)
 		return nil
 	end
 
+	local function get_declaration_name(node, bufnr)
+		for child in node:iter_children() do
+			if child:type() == "identifier" then
+				return vim.treesitter.get_node_text(child, bufnr)
+			end
+		end
+
+		-- Lua varibale_declaration
+		if node:type() == "variable_declaration" then
+			for child in node:iter_children() do
+				if child:type() == "assignment_statement" then
+					for subchild in child:iter_children() do
+						if subchild:type() == "variable_list" then
+							for id_node in subchild:iter_children() do
+								if id_node:type() == "identifier" then
+									return vim.treesitter.get_node_text(id_node, bufnr)
+								end
+							end
+						end
+					end
+				end
+			end
+		end
+
+		return nil
+	end
+
+	local identifier_types = {
+		function_declaration = true,
+		variable_declaration = true,
+	}
+
 	for id, info in pairs(src_info) do
-		if not is_mapped(id, true) and info.parent then
-			local m = get_mapping(info.parent:id(), true)
-			if m then
-				local d_parent = dst_info[m.dst].node
-				for child in d_parent:iter_children() do
-					if not is_mapped(child:id(), false) and child:type() == info.type then
-						table.insert(mappings, { src = id, dst = child:id() })
-						break
+		if not is_mapped(id, true) then
+			local parent = info.parent
+			local parent_mapped = false
+			local dest_parent_id = nil
+
+			if not parent then
+				parent_mapped = true
+			else
+				local m = get_mapping(parent:id(), true)
+				if m then
+					parent_mapped = true
+					dest_parent_id = m.dst
+				end
+			end
+
+			if parent_mapped then
+				local candidates = {}
+				if dest_parent_id then
+					local d_parent = dst_info[dest_parent_id].node
+					for child in d_parent:iter_children() do
+						if not is_mapped(child:id(), false) then
+							table.insert(candidates, child)
+						end
+					end
+				else
+					if not is_mapped(dst_root:id(), false) then
+						table.insert(candidates, dst_root)
+					end
+				end
+
+				local src_name = nil
+				if identifier_types[info.type] then
+					src_name = get_declaration_name(info.node, src_buf)
+				end
+
+				for _, cand in ipairs(candidates) do
+					local d_info = dst_info[cand:id()]
+					if d_info.type == info.type and d_info.label == info.label then
+						if src_name then
+							local dst_name = get_declaration_name(cand, dst_buf)
+							if src_name == dst_name then
+								table.insert(mappings, { src = id, dst = cand:id() })
+								break
+							end
+						else
+							table.insert(mappings, { src = id, dst = cand:id() })
+							break
+						end
 					end
 				end
 			end
