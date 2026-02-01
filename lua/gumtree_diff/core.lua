@@ -344,4 +344,78 @@ function M.recovery_match(src_root, dst_root, mappings, src_info, dst_info, src_
 	return mappings
 end
 
+-- Generate edit actions from node mappings
+-- Actions describe what changed: insert, delete, update, move
+function M.generate_actions(src_root, dst_root, mappings, src_info, dst_info)
+	local actions = {}
+
+	local function get_dst_id(src_id)
+		for _, m in ipairs(mappings) do
+			if m.src == src_id then
+				return m.dst
+			end
+		end
+		return nil
+	end
+
+	local function get_src_id(dst_id)
+		for _, m in ipairs(mappings) do
+			if m.dst == dst_id then
+				return m.src
+			end
+		end
+		return nil
+	end
+
+	local significant_types = {
+		function_declaration = true,
+		local_function = true,
+		variable_declaration = true,
+		local_variable_declaration = true,
+		return_statement = true,
+		function_call = true,
+		if_statement = true,
+		for_statement = true,
+		while_statement = true,
+	}
+
+	-- helper to check if any ancestor is unmapped and significant
+	local function has_unmapped_significant_ancestor(info, node_info_table, get_mapped_id)
+		local current = info.parent
+		while current do
+			local p_id = current:id()
+			local p_info = node_info_table[p_id]
+			if p_info then
+				if not get_mapped_id(p_id) and significant_types[p_info.type] then
+					return true
+				end
+				current = p_info.parent
+			else
+				break
+			end
+		end
+		return false
+	end
+
+	-- detecting deletion
+	for id, info in pairs(src_info) do
+		if not get_dst_id(id) and significant_types[info.type] then
+			if not has_unmapped_significant_ancestor(info, src_info, get_dst_id) then
+				table.insert(actions, { type = "delete", node = info.node })
+			end
+		end
+	end
+
+	-- detecting insertion
+	for id, info in pairs(dst_info) do
+		if not get_src_id(id) and significant_types[info.type] then
+			if not has_unmapped_significant_ancestor(info, dst_info, get_src_id) then
+				table.insert(actions, { type = "insert", node = info.node })
+			end
+		end
+	end
+
+	return actions
+end
+
 return M

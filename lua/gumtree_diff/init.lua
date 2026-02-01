@@ -38,6 +38,10 @@ function M.diff(args)
 
 	local parser1 = vim.treesitter.get_parser(buf1, lang)
 	local parser2 = vim.treesitter.get_parser(buf2, lang)
+	if not parser1 or not parser2 then
+		print("Failed to get Treesitter parser for one of the buffers.")
+		return
+	end
 	local root1 = parser1:parse()[1]:root()
 	local root2 = parser2:parse()[1]:root()
 
@@ -71,6 +75,30 @@ function M.diff(args)
 	else
 		print("(Recovery found no new mappings)")
 	end
+
+	local actions = core.generate_actions(root1, root2, mappings, src_info, dst_info)
+
+	print("\n========== EDIT ACTIONS ==========")
+
+	local function describe_node(node, bufnr)
+		local text = vim.treesitter.get_node_text(node, bufnr) or ""
+		text = text:gsub("\n", " ")
+		text = text:sub(1, 60)
+
+		local sr, sc, er, ec = node:range()
+		return string.format('%s [%d:%d - %d:%d] "%s"', node:type(), sr + 1, sc + 1, er + 1, ec + 1, text)
+	end
+
+	for _, action in ipairs(actions) do
+		if action.type == "delete" then
+			print("DELETE  " .. describe_node(action.node, buf1))
+		elseif action.type == "insert" then
+			print("INSERT  " .. describe_node(action.node, buf2))
+		end
+	end
+
+	print("Total edit actions: " .. #actions)
+	print("==================================\n")
 
 	M.print_mappings(mappings, src_info, dst_info, buf1, buf2)
 end
