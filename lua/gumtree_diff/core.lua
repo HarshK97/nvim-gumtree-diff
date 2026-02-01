@@ -2,11 +2,14 @@ local ts_utils = require("gumtree_diff.treesitter")
 
 local M = {}
 
+-- Top-down matching: match nodes from the top of the tree downwards
+-- Matches nodes with the same hash at each height level
 function M.top_down_match(src_root, dst_root, src_buf, dst_buf)
 	local mappings = {}
 	local src_info = ts_utils.preprocess_tree(src_root, src_buf)
 	local dst_info = ts_utils.preprocess_tree(dst_root, dst_buf)
 
+	-- Group nodes by their height in the tree
 	local function get_nodes_by_height(info)
 		local by_height = {}
 		for _, data in pairs(info) do
@@ -20,6 +23,7 @@ function M.top_down_match(src_root, dst_root, src_buf, dst_buf)
 	local src_by_height = get_nodes_by_height(src_info)
 	local dst_by_height = get_nodes_by_height(dst_info)
 
+	-- Find the maximum height in both trees
 	local max_h = 0
 	for h in pairs(src_by_height) do
 		if h > max_h then
@@ -32,6 +36,7 @@ function M.top_down_match(src_root, dst_root, src_buf, dst_buf)
 		end
 	end
 
+	-- For each height, match nodes with the same hash
 	for h = max_h, 1, -1 do
 		local s_nodes = src_by_height[h] or {}
 		local d_nodes = dst_by_height[h] or {}
@@ -39,6 +44,7 @@ function M.top_down_match(src_root, dst_root, src_buf, dst_buf)
 		for _, s in ipairs(s_nodes) do
 			for _, d in ipairs(d_nodes) do
 				if s.hash == d.hash then
+					-- Only map nodes that haven't been mapped yet
 					local s_mapped, d_mapped = false, false
 					for _, m in ipairs(mappings) do
 						if m.src == s.id then
@@ -59,7 +65,10 @@ function M.top_down_match(src_root, dst_root, src_buf, dst_buf)
 	return mappings, src_info, dst_info
 end
 
+-- Bottom-up matching: match nodes from leaves up, using parent mappings
+-- Tries to match nodes with the same type and label, and optionally name
 function M.bottom_up_match(mappings, src_info, dst_info, src_root, dst_root, src_buf, dst_buf)
+	-- Check if a node is already mapped
 	local function is_mapped(id, is_src)
 		for _, m in ipairs(mappings) do
 			if is_src and m.src == id then
@@ -71,6 +80,7 @@ function M.bottom_up_match(mappings, src_info, dst_info, src_root, dst_root, src
 		end
 		return false
 	end
+	-- Get the mapping for a node
 	local function get_mapping(id, is_src)
 		for _, m in ipairs(mappings) do
 			if is_src and m.src == id then
@@ -83,6 +93,7 @@ function M.bottom_up_match(mappings, src_info, dst_info, src_root, dst_root, src
 		return nil
 	end
 
+	-- Get the name of a declaration node (function or variable)
 	local function get_declaration_name(node, bufnr)
 		for child in node:iter_children() do
 			if child:type() == "identifier" then
@@ -90,7 +101,7 @@ function M.bottom_up_match(mappings, src_info, dst_info, src_root, dst_root, src
 			end
 		end
 
-		-- Lua varibale_declaration
+		-- Special case for Lua variable_declaration
 		if node:type() == "variable_declaration" then
 			for child in node:iter_children() do
 				if child:type() == "assignment_statement" then
@@ -110,11 +121,13 @@ function M.bottom_up_match(mappings, src_info, dst_info, src_root, dst_root, src
 		return nil
 	end
 
+	-- Types that have a name (function, variable)
 	local identifier_types = {
 		function_declaration = true,
 		variable_declaration = true,
 	}
 
+	-- Try to match unmapped nodes whose parent is mapped
 	for id, info in pairs(src_info) do
 		if not is_mapped(id, true) then
 			local parent = info.parent
@@ -173,7 +186,9 @@ function M.bottom_up_match(mappings, src_info, dst_info, src_root, dst_root, src
 	return mappings
 end
 
+-- Recovery matching: tries to match remaining unmapped nodes using LCS and unique type
 function M.recovery_match(src_root, dst_root, mappings, src_info, dst_info, src_buf, dst_buf)
+	-- Check if a node is already mapped
 	local function is_mapped(id, is_src)
 		for _, m in ipairs(mappings) do
 			if is_src and m.src == id then
@@ -186,6 +201,7 @@ function M.recovery_match(src_root, dst_root, mappings, src_info, dst_info, src_
 		return false
 	end
 
+	-- Get the mapping for a node
 	local function get_mapping(id, is_src)
 		for _, m in ipairs(mappings) do
 			if is_src and m.src == id then
@@ -195,7 +211,7 @@ function M.recovery_match(src_root, dst_root, mappings, src_info, dst_info, src_
 		return nil
 	end
 
-	-- LCS implementation
+	-- Longest Common Subsequence (LCS) for matching children
 	local function lcs(src_list, dst_list, hash_key)
 		local m, n = #src_list, #dst_list
 		if m == 0 or n == 0 then
@@ -238,7 +254,7 @@ function M.recovery_match(src_root, dst_root, mappings, src_info, dst_info, src_
 		return result
 	end
 
-	-- Simple recovery function from https://hal.science/hal-04855170v1/file/GumTree_simple__fine_grained__accurate_and_scalable_source_differencing.pdf
+	-- Try to match children using LCS and unique type
 	local function simple_recovery(src_node, dst_node)
 		local src_children, dst_children = {}, {}
 		for child in src_node:iter_children() do
@@ -255,14 +271,14 @@ function M.recovery_match(src_root, dst_root, mappings, src_info, dst_info, src_
 			return
 		end
 
-		-- Step 1: LCS on hash (exact match)
+		-- Step 1: match children with same hash (exact match)
 		for _, match in ipairs(lcs(src_children, dst_children, "hash")) do
 			if not is_mapped(match.src:id(), true) and not is_mapped(match.dst:id(), false) then
 				table.insert(mappings, { src = match.src:id(), dst = match.dst:id() })
 			end
 		end
 
-		-- Rebuild unmapped lists
+		-- Step 2: match children with same structure_hash (for updates)
 		src_children, dst_children = {}, {}
 		for child in src_node:iter_children() do
 			if not is_mapped(child:id(), true) then
@@ -274,15 +290,13 @@ function M.recovery_match(src_root, dst_root, mappings, src_info, dst_info, src_
 				table.insert(dst_children, child)
 			end
 		end
-
-		-- Step 2: LCS on structure_hash (for updates)
 		for _, match in ipairs(lcs(src_children, dst_children, "structure_hash")) do
 			if not is_mapped(match.src:id(), true) and not is_mapped(match.dst:id(), false) then
 				table.insert(mappings, { src = match.src:id(), dst = match.dst:id() })
 			end
 		end
 
-		-- Rebuild unmapped lists again
+		-- Step 3: match children with unique type (type appears only once)
 		src_children, dst_children = {}, {}
 		for child in src_node:iter_children() do
 			if not is_mapped(child:id(), true) then
@@ -295,7 +309,6 @@ function M.recovery_match(src_root, dst_root, mappings, src_info, dst_info, src_
 			end
 		end
 
-		-- Step 3: Unique type matching
 		local src_by_type, dst_by_type = {}, {}
 		local src_type_count, dst_type_count = {}, {}
 		for _, c in ipairs(src_children) do
