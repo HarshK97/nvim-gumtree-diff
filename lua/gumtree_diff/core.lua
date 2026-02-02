@@ -369,14 +369,14 @@ function M.generate_actions(src_root, dst_root, mappings, src_info, dst_info)
 
 	local significant_types = {
 		function_declaration = true,
-		local_function = true,
 		variable_declaration = true,
-		local_variable_declaration = true,
-		return_statement = true,
-		function_call = true,
+		function_definition = true,
 		if_statement = true,
+		return_statement = true,
+		expression_statement = true,
 		for_statement = true,
 		while_statement = true,
+		function_call = true,
 	}
 
 	-- helper to check if any ancestor is unmapped and significant
@@ -397,7 +397,116 @@ function M.generate_actions(src_root, dst_root, mappings, src_info, dst_info)
 		return false
 	end
 
-	-- detecting deletion
+	-- Helper: check if node or any descendant has different content
+	local function has_content_change(src_node, dst_node)
+		local src_info_data = src_info[src_node:id()]
+		local dst_info_data = dst_info[dst_node:id()]
+
+		if src_info_data.hash ~= dst_info_data.hash then
+			return true
+		end
+
+		return false
+	end
+
+	local updated_src_ids = {}
+
+	local nodes_with_changes = {}
+	for _, m in ipairs(mappings) do
+		local s, d = src_info[m.src], dst_info[m.dst]
+		if has_content_change(s.node, d.node) then
+			nodes_with_changes[m.src] = true
+			updated_src_ids[m.src] = true
+		end
+	end
+
+	-- Helper: check if any mapped ancestor also has content changes
+	local function has_updated_significant_ancestor(info)
+		local current = info.parent
+		while current do
+			local p_id = current:id()
+			local p_info = src_info[p_id]
+			if p_info then
+				if nodes_with_changes[p_id] and significant_types[p_info.type] then
+					return true
+				end
+				current = p_info.parent
+			else
+				break
+			end
+		end
+		return false
+	end
+
+	-- UPDATES: mapped nodes with different content, but only significant types without updated ancestors
+	for _, m in ipairs(mappings) do
+		local s, d = src_info[m.src], dst_info[m.dst]
+
+		if nodes_with_changes[m.src] and significant_types[s.type] then
+			if not has_updated_significant_ancestor(s) then
+				table.insert(actions, { type = "update", node = s.node, target = d.node })
+			end
+		end
+	end
+
+	-- MOVES: check if parent changed or sibling order changed
+	for _, m in ipairs(mappings) do
+		if updated_src_ids[m.src] then
+			goto continue_move
+		end
+
+		local s, d = src_info[m.src], dst_info[m.dst]
+		if not significant_types[s.type] then
+			goto continue_move
+		end
+		if not s.parent or not d.parent then
+			goto continue_move
+		end
+
+		local dst_of_src_parent = get_dst_id(s.parent:id())
+		local is_move = false
+
+		if dst_of_src_parent ~= d.parent:id() then
+			is_move = true
+		else
+			local prev_src_sibling = nil
+			for child in s.parent:iter_children() do
+				if child:id() == s.node:id() then
+					break
+				end
+				if get_dst_id(child:id()) then
+					prev_src_sibling = child:id()
+				end
+			end
+
+			local prev_dst_sibling = nil
+			for child in d.parent:iter_children() do
+				if child:id() == d.node:id() then
+					break
+				end
+				if get_src_id(child:id()) then
+					prev_dst_sibling = child:id()
+				end
+			end
+
+			if prev_src_sibling then
+				local expected_prev = get_dst_id(prev_src_sibling)
+				if prev_dst_sibling ~= expected_prev then
+					is_move = true
+				end
+			elseif prev_dst_sibling then
+				is_move = true
+			end
+		end
+
+		if is_move then
+			table.insert(actions, { type = "move", node = s.node, target = d.node })
+		end
+
+		::continue_move::
+	end
+
+	-- DELETES: unmapped source nodes
 	for id, info in pairs(src_info) do
 		if not get_dst_id(id) and significant_types[info.type] then
 			if not has_unmapped_significant_ancestor(info, src_info, get_dst_id) then
@@ -406,7 +515,7 @@ function M.generate_actions(src_root, dst_root, mappings, src_info, dst_info)
 		end
 	end
 
-	-- detecting insertion
+	-- INSERTS: unmapped destination nodes
 	for id, info in pairs(dst_info) do
 		if not get_src_id(id) and significant_types[info.type] then
 			if not has_unmapped_significant_ancestor(info, dst_info, get_src_id) then

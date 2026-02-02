@@ -94,6 +94,10 @@ function M.diff(args)
 			print("DELETE  " .. describe_node(action.node, buf1))
 		elseif action.type == "insert" then
 			print("INSERT  " .. describe_node(action.node, buf2))
+		elseif action.type == "update" then
+			print("UPDATE  " .. describe_node(action.node, buf1) .. "  -->  " .. describe_node(action.target, buf2))
+		elseif action.type == "move" then
+			print("MOVE    " .. describe_node(action.node, buf1) .. "  -->  " .. describe_node(action.target, buf2))
 		end
 	end
 
