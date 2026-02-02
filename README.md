@@ -2,7 +2,7 @@
 
 > ⚠️ **This is a prototype!** Its still in early development and might have some bugs. Feel free to try it out tho!
 
-A Neovim plugin that does semantic diffing using Treesitter and the Gumtree algorithm. Instead of just comparing lines like regular diff, this plugin actually understands the code structure and can detect things like moved functions, renamed variables, and updated code blocks.
+A Proof of concept that semantic diffing using Treesitter and the Gumtree algorithm is possible in Neovim. Instead of just comparing lines like regular diff, this plugin actually understands the code structure and can detect things like moved functions, renamed variables, and updated code blocks.
 
 ## Why tho?
 
