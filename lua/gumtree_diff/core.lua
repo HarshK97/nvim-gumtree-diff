@@ -118,6 +118,32 @@ function M.bottom_up_match(mappings, src_info, dst_info, src_root, dst_root, src
 			end
 		end
 
+		-- Special case for C function_definition
+		if node:type() == "function_definition" then
+			for child in node:iter_children() do
+				if child:type() == "function_declarator" then
+					for subchild in child:iter_children() do
+						if subchild:type() == "identifier" then
+							return vim.treesitter.get_node_text(subchild, bufnr)
+						end
+					end
+				end
+			end
+		end
+
+		-- Special case for Python expression_statement 
+		if node:type() == "expression_statement" then
+			for child in node:iter_children() do
+				if child:type() == "assignment" then
+					for subchild in child:iter_children() do
+						if subchild:type() == "identifier" then
+							return vim.treesitter.get_node_text(subchild, bufnr)
+						end
+					end
+				end
+			end
+		end
+
 		return nil
 	end
 
@@ -125,6 +151,9 @@ function M.bottom_up_match(mappings, src_info, dst_info, src_root, dst_root, src
 	local identifier_types = {
 		function_declaration = true,
 		variable_declaration = true,
+		class_definition = true,
+		function_definition = true,
+		expression_statement = true, 
 	}
 
 	-- Try to match unmapped nodes whose parent is mapped
@@ -135,6 +164,8 @@ function M.bottom_up_match(mappings, src_info, dst_info, src_root, dst_root, src
 			local dest_parent_id = nil
 
 			if not parent then
+				parent_mapped = true
+			elseif parent:id() == src_root:id() then
 				parent_mapped = true
 			else
 				local m = get_mapping(parent:id(), true)
@@ -154,8 +185,10 @@ function M.bottom_up_match(mappings, src_info, dst_info, src_root, dst_root, src
 						end
 					end
 				else
-					if not is_mapped(dst_root:id(), false) then
-						table.insert(candidates, dst_root)
+					for child in dst_root:iter_children() do
+						if not is_mapped(child:id(), false) then
+							table.insert(candidates, child)
+						end
 					end
 				end
 
@@ -377,6 +410,23 @@ function M.generate_actions(src_root, dst_root, mappings, src_info, dst_info)
 		for_statement = true,
 		while_statement = true,
 		function_call = true,
+		-- Python
+        class_definition = true,
+        import_statement = true,
+        import_from_statement = true,
+        decorator = true,
+		-- C
+        declaration = true,
+        preproc_include = true,
+        preproc_def = true,
+        preproc_function_def = true,
+	}
+
+	-- only these top-level constructs should be tracked for moves
+	local movable_types = {
+		function_declaration = true,
+		function_definition = true,
+		class_definition = true,
 	}
 
 	-- helper to check if any ancestor is unmapped and significant
@@ -451,12 +501,8 @@ function M.generate_actions(src_root, dst_root, mappings, src_info, dst_info)
 
 	-- MOVES: check if parent changed or sibling order changed
 	for _, m in ipairs(mappings) do
-		if updated_src_ids[m.src] then
-			goto continue_move
-		end
-
 		local s, d = src_info[m.src], dst_info[m.dst]
-		if not significant_types[s.type] then
+		if not movable_types[s.type] then
 			goto continue_move
 		end
 		if not s.parent or not d.parent then
@@ -466,15 +512,23 @@ function M.generate_actions(src_root, dst_root, mappings, src_info, dst_info)
 		local dst_of_src_parent = get_dst_id(s.parent:id())
 		local is_move = false
 
-		if dst_of_src_parent ~= d.parent:id() then
+		local src_parent_is_root = (s.parent:id() == src_root:id())
+		local dst_parent_is_root = (d.parent:id() == dst_root:id())
+		
+		if src_parent_is_root and dst_parent_is_root then
+			is_move = false
+		elseif dst_of_src_parent ~= d.parent:id() then
 			is_move = true
-		else
+		end
+		
+		if not is_move then
 			local prev_src_sibling = nil
 			for child in s.parent:iter_children() do
 				if child:id() == s.node:id() then
 					break
 				end
-				if get_dst_id(child:id()) then
+				local child_info = src_info[child:id()]
+				if get_dst_id(child:id()) and child_info and movable_types[child_info.type] then
 					prev_src_sibling = child:id()
 				end
 			end
@@ -484,7 +538,8 @@ function M.generate_actions(src_root, dst_root, mappings, src_info, dst_info)
 				if child:id() == d.node:id() then
 					break
 				end
-				if get_src_id(child:id()) then
+				local child_info = dst_info[child:id()]
+				if get_src_id(child:id()) and child_info and movable_types[child_info.type] then
 					prev_dst_sibling = child:id()
 				end
 			end
@@ -500,7 +555,12 @@ function M.generate_actions(src_root, dst_root, mappings, src_info, dst_info)
 		end
 
 		if is_move then
-			table.insert(actions, { type = "move", node = s.node, target = d.node })
+			local src_line = s.node:range()
+			local dst_line = d.node:range()
+			local line_diff = math.abs(dst_line - src_line)
+			if line_diff > 3 then
+				table.insert(actions, { type = "move", node = s.node, target = d.node })
+			end
 		end
 
 		::continue_move::
