@@ -88,6 +88,45 @@ function M.bottom_up_match(mappings, src_info, dst_info, src_root, dst_root, src
 
 	-- Get the name of a declaration node (function or variable)
 	local function get_declaration_name(node, bufnr)
+		if node:type() == "function_declaration" then
+			local function lua_name_from_node(name_node)
+				if not name_node then
+					return nil
+				end
+				local ntype = name_node:type()
+				if ntype == "identifier" then
+					return vim.treesitter.get_node_text(name_node, bufnr)
+				end
+				if ntype == "dot_index_expression" then
+					local tbl = name_node:field("table")[1]
+					local field = name_node:field("field")[1]
+					local left = lua_name_from_node(tbl)
+					local right = lua_name_from_node(field)
+					if left and right then
+						return left .. "." .. right
+					end
+				end
+				if ntype == "method_index_expression" then
+					local tbl = name_node:field("table")[1]
+					local method = name_node:field("method")[1]
+					local left = lua_name_from_node(tbl)
+					local right = lua_name_from_node(method)
+					if left and right then
+						return left .. ":" .. right
+					end
+				end
+				return vim.treesitter.get_node_text(name_node, bufnr)
+			end
+
+			local name_nodes = node:field("name")
+			if name_nodes and name_nodes[1] then
+				local full_name = lua_name_from_node(name_nodes[1])
+				if full_name and #full_name > 0 then
+					return full_name
+				end
+			end
+		end
+
 		for child in node:iter_children() do
 			if child:type() == "identifier" then
 				return vim.treesitter.get_node_text(child, bufnr)
