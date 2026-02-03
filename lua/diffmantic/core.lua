@@ -558,35 +558,62 @@ function M.generate_actions(src_root, dst_root, mappings, src_info, dst_info)
 		end
 		
 		if not is_move then
-			local prev_src_sibling = nil
-			for child in s.parent:iter_children() do
-				if child:id() == s.node:id() then
-					break
+			local function mapped_movable_index(node, info_tbl, map_tbl)
+				if not node or not node:parent() then
+					return nil
 				end
-				local child_info = src_info[child:id()]
-				if src_to_dst[child:id()] and child_info and movable_types[child_info.type] then
-					prev_src_sibling = child:id()
+				local idx = 0
+				for child in node:parent():iter_children() do
+					local child_info = info_tbl[child:id()]
+					if child_info and movable_types[child_info.type] and map_tbl[child:id()] then
+						idx = idx + 1
+						if child:id() == node:id() then
+							return idx
+						end
+					end
 				end
+				return nil
 			end
 
-			local prev_dst_sibling = nil
-			for child in d.parent:iter_children() do
-				if child:id() == d.node:id() then
-					break
-				end
-				local child_info = dst_info[child:id()]
-				if dst_to_src[child:id()] and child_info and movable_types[child_info.type] then
-					prev_dst_sibling = child:id()
-				end
-			end
-
-			if prev_src_sibling then
-				local expected_prev = src_to_dst[prev_src_sibling]
-				if prev_dst_sibling ~= expected_prev then
+			local src_idx = mapped_movable_index(s.node, src_info, src_to_dst)
+			local dst_idx = mapped_movable_index(d.node, dst_info, dst_to_src)
+			if src_idx and dst_idx then
+				if src_idx == dst_idx then
+					goto continue_move
+				else
 					is_move = true
 				end
-			elseif prev_dst_sibling then
-				is_move = true
+			else
+				local prev_src_sibling = nil
+				for child in s.parent:iter_children() do
+					if child:id() == s.node:id() then
+						break
+					end
+					local child_info = src_info[child:id()]
+					if src_to_dst[child:id()] and child_info and movable_types[child_info.type] then
+						prev_src_sibling = child:id()
+					end
+				end
+
+				local prev_dst_sibling = nil
+				for child in d.parent:iter_children() do
+					if child:id() == d.node:id() then
+						break
+					end
+					local child_info = dst_info[child:id()]
+					if dst_to_src[child:id()] and child_info and movable_types[child_info.type] then
+						prev_dst_sibling = child:id()
+					end
+				end
+
+				if prev_src_sibling then
+					local expected_prev = src_to_dst[prev_src_sibling]
+					if prev_dst_sibling ~= expected_prev then
+						is_move = true
+					end
+				elseif prev_dst_sibling then
+					is_move = true
+				end
 			end
 		end
 
