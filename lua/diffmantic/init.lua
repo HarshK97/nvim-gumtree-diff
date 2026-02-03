@@ -20,16 +20,30 @@ function M.diff(args)
 		vim.cmd("tabnew")
 		vim.cmd("edit " .. file1)
 		buf1 = vim.api.nvim_get_current_buf()
+		local win1 = vim.api.nvim_get_current_win()
 
 		vim.cmd("vsplit " .. file2)
 		buf2 = vim.api.nvim_get_current_buf()
+		local win2 = vim.api.nvim_get_current_win()
+
+		vim.wo[win1].scrollbind = true
+		vim.wo[win1].cursorbind = true
+		vim.wo[win2].scrollbind = true
+		vim.wo[win2].cursorbind = true
 	else
 		-- Case: 1 file provided. Compare current buffer vs file.
 		buf1 = vim.api.nvim_get_current_buf()
+		local win1 = vim.api.nvim_get_current_win()
 		local expanded_path = vim.fn.expand(file1)
 
 		vim.cmd("vsplit " .. expanded_path)
 		buf2 = vim.api.nvim_get_current_buf()
+		local win2 = vim.api.nvim_get_current_win()
+
+		vim.wo[win1].scrollbind = true
+		vim.wo[win1].cursorbind = true
+		vim.wo[win2].scrollbind = true
+		vim.wo[win2].cursorbind = true
 	end
 
 	local lang = vim.treesitter.language.get_lang(vim.bo[buf1].filetype)
