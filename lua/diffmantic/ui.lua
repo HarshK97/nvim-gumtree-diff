@@ -559,6 +559,9 @@ function M.apply_highlights(src_buf, dst_buf, actions)
 				end
 			end
 		elseif action.type == "delete" then
+			if is_suppressed(src_suppress, node) then
+				goto continue_action
+			end
 			pcall(vim.api.nvim_buf_set_extmark, src_buf, ns, sr, sc, {
 				end_row = er,
 				end_col = ec,
@@ -567,6 +570,9 @@ function M.apply_highlights(src_buf, dst_buf, actions)
 				sign_hl_group = "DiffDelete",
 			})
 		elseif action.type == "insert" then
+			if is_suppressed(dst_suppress, node) then
+				goto continue_action
+			end
 			pcall(vim.api.nvim_buf_set_extmark, dst_buf, ns, sr, sc, {
 				end_row = er,
 				end_col = ec,
@@ -575,6 +581,8 @@ function M.apply_highlights(src_buf, dst_buf, actions)
 				sign_hl_group = "DiffAdd",
 			})
 		end
+
+		::continue_action::
 	end
 end
 
