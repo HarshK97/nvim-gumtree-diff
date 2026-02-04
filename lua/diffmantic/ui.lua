@@ -353,13 +353,45 @@ function M.apply_highlights(src_buf, dst_buf, actions)
 	M.clear_highlights(src_buf)
 	M.clear_highlights(dst_buf)
 
+	-- Suppress insert/delete inside moved/updated ranges.
+	local src_suppress = {}
+	local dst_suppress = {}
+
+	local function add_range(ranges, node)
+		if not node then
+			return
+		end
+		local sr, _, er, _ = node:range()
+		table.insert(ranges, { start_row = sr, end_row = er })
+	end
+
+	for _, action in ipairs(actions) do
+		if action.type == "move" or action.type == "update" then
+			add_range(src_suppress, action.node)
+			add_range(dst_suppress, action.target)
+		end
+	end
+
+	local function is_suppressed(ranges, node)
+		if not node then
+			return false
+		end
+		local sr, _, er, _ = node:range()
+		for _, range in ipairs(ranges) do
+			if sr >= range.start_row and er <= range.end_row then
+				return true
+			end
+		end
+		return false
+	end
+
 	for _, action in ipairs(actions) do
 		local node = action.node
 		local sr, sc, er, ec = node:range()
 
 		if action.type == "move" then
 			local target = action.target
-			local tr, _, _, _ = target:range()
+			local tr, tc, ter, tec = target:range()
 			local src_line = sr + 1
 			local dst_line = tr + 1
 
