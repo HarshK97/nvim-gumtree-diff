@@ -122,7 +122,7 @@ local function run_benchmark(name, num_functions, vars_per_function, changes)
 
 	-- Generate actions
 	local start_actions = vim.loop.hrtime()
-	local actions = core.generate_actions(src_root, dst_root, mappings, src_info, dst_info)
+	local actions, action_timings = core.generate_actions(src_root, dst_root, mappings, src_info, dst_info, { timings = true })
 	local actions_time = (vim.loop.hrtime() - start_actions) / 1e6
 
 	local total_time = (vim.loop.hrtime() - start_total) / 1e6
@@ -146,6 +146,13 @@ local function run_benchmark(name, num_functions, vars_per_function, changes)
 	log(string.format("  Bottom-up:   %8.2f ms", bottomup_time))
 	log(string.format("  Recovery:    %8.2f ms", recovery_time))
 	log(string.format("  Actions:     %8.2f ms", actions_time))
+	if action_timings then
+		log(string.format("    Prep:      %8.2f ms", action_timings.precompute or 0))
+		log(string.format("    Updates:   %8.2f ms", action_timings.updates or 0))
+		log(string.format("    Moves:     %8.2f ms", action_timings.moves or 0))
+		log(string.format("    Deletes:   %8.2f ms", action_timings.deletes or 0))
+		log(string.format("    Inserts:   %8.2f ms", action_timings.inserts or 0))
+	end
 	log(string.format("  TOTAL:       %8.2f ms", total_time))
 
 	log(string.format("\nResults:"))

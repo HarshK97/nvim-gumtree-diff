@@ -2,10 +2,33 @@ local M = {}
 
 -- Generate edit actions from node mappings
 -- Actions describe what changed: insert, delete, update, move
-function M.generate_actions(src_root, dst_root, mappings, src_info, dst_info)
+function M.generate_actions(src_root, dst_root, mappings, src_info, dst_info, opts)
 	local actions = {}
+	local timings = nil
+	local hrtime = nil
+	if opts and opts.timings then
+		timings = {}
+		if vim and vim.loop and vim.loop.hrtime then
+			hrtime = vim.loop.hrtime
+		end
+	end
+
+	local function start_timer()
+		if not hrtime then
+			return nil
+		end
+		return hrtime()
+	end
+
+	local function stop_timer(started_at, key)
+		if not timings or not started_at then
+			return
+		end
+		timings[key] = (hrtime() - started_at) / 1e6
+	end
 
 	-- Build O(1) lookup tables
+	local precompute_start = start_timer()
 	local src_to_dst = {}
 	local dst_to_src = {}
 	for _, m in ipairs(mappings) do
@@ -136,6 +159,8 @@ function M.generate_actions(src_root, dst_root, mappings, src_info, dst_info)
 	end
 
 	-- UPDATES: mapped nodes with different content, but only significant types without updated ancestors
+	stop_timer(precompute_start, "precompute")
+	local updates_start = start_timer()
 	for _, m in ipairs(mappings) do
 		local s, d = src_info[m.src], dst_info[m.dst]
 
@@ -145,8 +170,10 @@ function M.generate_actions(src_root, dst_root, mappings, src_info, dst_info)
 			end
 		end
 	end
+	stop_timer(updates_start, "updates")
 
 	-- MOVES: check if parent changed or sibling order changed
+	local moves_start = start_timer()
 	for _, m in ipairs(mappings) do
 		local s, d = src_info[m.src], dst_info[m.dst]
 		if not movable_types[s.type] then
@@ -239,8 +266,10 @@ function M.generate_actions(src_root, dst_root, mappings, src_info, dst_info)
 
 		::continue_move::
 	end
+	stop_timer(moves_start, "moves")
 
 	-- DELETES: unmapped source nodes
+	local deletes_start = start_timer()
 	for id, info in pairs(src_info) do
 		if not src_to_dst[id] and significant_types[info.type] then
 			if not src_has_unmapped_sig_ancestor[id] then
@@ -248,8 +277,10 @@ function M.generate_actions(src_root, dst_root, mappings, src_info, dst_info)
 			end
 		end
 	end
+	stop_timer(deletes_start, "deletes")
 
 	-- INSERTS: unmapped destination nodes
+	local inserts_start = start_timer()
 	for id, info in pairs(dst_info) do
 		if not dst_to_src[id] and significant_types[info.type] then
 			if not dst_has_unmapped_sig_ancestor[id] then
@@ -257,8 +288,9 @@ function M.generate_actions(src_root, dst_root, mappings, src_info, dst_info)
 			end
 		end
 	end
+	stop_timer(inserts_start, "inserts")
 
-	return actions
+	return actions, timings
 end
 
 return M
