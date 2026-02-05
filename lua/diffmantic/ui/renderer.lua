@@ -72,9 +72,20 @@ function M.render(src_buf, dst_buf, actions, ns)
 			if #leaf_changes > 0 then
 				local rename_signs = {}
 				local rename_signs_src = {}
-				local rename_was_lines = {}
-				local update_signs = {}
+				local rename_inline_src = {}
+				local rename_inline_dst = {}
+				local update_signs_dst = {}
+				local update_signs_src = {}
 				local has_other_changes = false
+				local rename_pairs = {}
+
+				for _, change in ipairs(leaf_changes) do
+					local src_node = change.src_node
+					local dst_node = change.dst_node
+					if helpers.is_rename_identifier(src_node) or helpers.is_rename_identifier(dst_node) then
+						rename_pairs[change.src_text] = change.dst_text
+					end
+				end
 
 				for _, change in ipairs(leaf_changes) do
 					local src_node = change.src_node
@@ -82,8 +93,25 @@ function M.render(src_buf, dst_buf, actions, ns)
 					local ctr, ctc, cter, ctec = dst_node:range()
 					local csr, csc, cser, csec = src_node:range()
 
+					local is_rename_ref = false
+					if not (helpers.is_rename_identifier(src_node) or helpers.is_rename_identifier(dst_node)) then
+						local src_type = src_node:type()
+						local dst_type = dst_node:type()
+						if (src_type == "identifier" or src_type == "field_identifier" or src_type == "type_identifier")
+							and (dst_type == "identifier" or dst_type == "field_identifier" or dst_type == "type_identifier")
+							and rename_pairs[change.src_text] == change.dst_text
+						then
+							is_rename_ref = true
+						end
+					end
+
+					if is_rename_ref then
+						-- Identifier usage changed only due to rename; ignore to avoid noise.
+						goto continue_leaf
+					end
+
 					if helpers.is_rename_identifier(src_node) or helpers.is_rename_identifier(dst_node) then
-						-- Rename: highlight identifier, show ghost "was" line.
+						-- Rename: highlight identifier with inline "was"/"renamed to".
 						if not rename_signs_src[csr] then
 							rename_signs_src[csr] = true
 							pcall(vim.api.nvim_buf_set_extmark, src_buf, ns, csr, csc, {
@@ -117,17 +145,33 @@ function M.render(src_buf, dst_buf, actions, ns)
 								hl_group = "DiffChange",
 							})
 						end
-
-						if not rename_was_lines[ctr] then
-							rename_was_lines[ctr] = true
-							local line = vim.api.nvim_buf_get_lines(dst_buf, ctr, ctr + 1, false)[1] or ""
-							local indent = line:match("^%s*") or ""
-							pcall(vim.api.nvim_buf_set_extmark, dst_buf, ns, ctr, 0, {
-								virt_lines = { { { indent .. "└─ was: " .. change.src_text, "Comment" } } },
-							})
+						local src_key = tostring(src_node:id())
+						if not rename_inline_src[src_key] then
+							rename_inline_src[src_key] = true
+							helpers.set_inline_virt_text(
+								src_buf,
+								ns,
+								csr,
+								csec,
+								" renamed to " .. change.dst_text,
+								"Comment"
+							)
 						end
-					elseif helpers.is_value_node(src_node, change.src_text) or helpers.is_value_node(dst_node, change.dst_text) then
-						-- Value change: micro-diff + inline "was".
+						local dst_key = tostring(dst_node:id())
+						if not rename_inline_dst[dst_key] then
+							rename_inline_dst[dst_key] = true
+							helpers.set_inline_virt_text(
+								dst_buf,
+								ns,
+								ctr,
+								ctec,
+								string.format(" (was %s)", change.src_text),
+								"Comment"
+							)
+						end
+					elseif helpers.is_value_node(src_node, change.src_text)
+						or helpers.is_value_node(dst_node, change.dst_text) then
+						-- Value change: micro-diff only (no virtual text).
 						local fragment = helpers.diff_fragment(change.src_text, change.dst_text)
 						if fragment then
 							local rel_start = fragment.new_start - 1
@@ -139,19 +183,28 @@ function M.render(src_buf, dst_buf, actions, ns)
 									hl_group = "DiffChange",
 								})
 							end
+							if cser == csr then
+								pcall(vim.api.nvim_buf_set_extmark, src_buf, ns, csr, csc + fragment.old_start - 1, {
+									end_row = cser,
+									end_col = csc + fragment.old_end,
+									hl_group = "DiffChange",
+								})
+							end
 
-							if not update_signs[ctr] then
-								update_signs[ctr] = true
+							if not update_signs_dst[ctr] then
+								update_signs_dst[ctr] = true
 								pcall(vim.api.nvim_buf_set_extmark, dst_buf, ns, ctr, ctc + rel_end, {
 									sign_text = "U",
 									sign_hl_group = "DiffChange",
 								})
 							end
-
-							local indent = string.rep(" ", math.max(0, ctc + rel_end))
-							pcall(vim.api.nvim_buf_set_extmark, dst_buf, ns, ctr, 0, {
-								virt_lines = { { { indent .. "└─ was: " .. fragment.old_fragment, "Comment" } } },
-							})
+							if not update_signs_src[csr] then
+								update_signs_src[csr] = true
+								pcall(vim.api.nvim_buf_set_extmark, src_buf, ns, csr, csc + fragment.old_end, {
+									sign_text = "U",
+									sign_hl_group = "DiffChange",
+								})
+							end
 						else
 							pcall(vim.api.nvim_buf_set_extmark, dst_buf, ns, ctr, ctc, {
 								end_row = cter,
@@ -160,14 +213,30 @@ function M.render(src_buf, dst_buf, actions, ns)
 								sign_text = "U",
 								sign_hl_group = "DiffChange",
 							})
-							local indent = string.rep(" ", math.max(0, ctc))
-							pcall(vim.api.nvim_buf_set_extmark, dst_buf, ns, ctr, 0, {
-								virt_lines = { { { indent .. "└─ was: " .. change.src_text, "Comment" } } },
-							})
+							if cser == csr then
+								if not update_signs_src[csr] then
+									update_signs_src[csr] = true
+									pcall(vim.api.nvim_buf_set_extmark, src_buf, ns, csr, csc, {
+										end_row = cser,
+										end_col = csec,
+										hl_group = "DiffChange",
+										sign_text = "U",
+										sign_hl_group = "DiffChange",
+									})
+								else
+									pcall(vim.api.nvim_buf_set_extmark, src_buf, ns, csr, csc, {
+										end_row = cser,
+										end_col = csec,
+										hl_group = "DiffChange",
+									})
+								end
+							end
 						end
 					else
 						has_other_changes = true
 					end
+
+					::continue_leaf::
 				end
 
 				if has_other_changes then
@@ -209,7 +278,7 @@ function M.render(src_buf, dst_buf, actions, ns)
 				end
 			end
 		elseif action.type == "delete" then
-			if is_suppressed(src_suppress, node) then
+			if is_suppressed(src_suppress, node) and node:type() ~= "field_declaration" then
 				goto continue_action
 			end
 			pcall(vim.api.nvim_buf_set_extmark, src_buf, ns, sr, sc, {
@@ -220,7 +289,7 @@ function M.render(src_buf, dst_buf, actions, ns)
 				sign_hl_group = "DiffDelete",
 			})
 		elseif action.type == "insert" then
-			if is_suppressed(dst_suppress, node) then
+			if is_suppressed(dst_suppress, node) and node:type() ~= "field_declaration" then
 				goto continue_action
 			end
 			pcall(vim.api.nvim_buf_set_extmark, dst_buf, ns, sr, sc, {

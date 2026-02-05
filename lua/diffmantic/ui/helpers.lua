@@ -79,50 +79,70 @@ function M.node_in_field(parent, field_name, node)
 end
 
 function M.is_rename_identifier(node)
-       if not node then
-               return false
-       end
+	if not node then
+		return false
+	end
 
-       local node_type = node:type()
-       if node_type ~= "identifier" then
-               return false
-       end
+	local node_type = node:type()
+	if node_type ~= "identifier" and node_type ~= "type_identifier" and node_type ~= "field_identifier" then
+		return false
+	end
 
-       local parent = node:parent()
-       if not parent then
-               return false
-       end
+	local parent = node:parent()
+	if not parent then
+		return false
+	end
 
-       local parent_type = parent:type()
-       if parent_type == "parameters" or parent_type == "parameter_list" or parent_type == "formal_parameters" then
-               return true
-       end
+	local parent_type = parent:type()
+	if parent_type == "parameters" or parent_type == "parameter_list" or parent_type == "formal_parameters" then
+		return true
+	end
 
-       if parent_type == "assignment" and M.node_in_field(parent, "left", node) then
-               return true
-       end
+	if parent_type == "assignment" and M.node_in_field(parent, "left", node) then
+		return true
+	end
 
-       if parent_type == "assignment_statement" and M.node_in_field(parent, "variable", node) then
-               return true
-       end
+	if parent_type == "assignment_statement" and M.node_in_field(parent, "variable", node) then
+		return true
+	end
+	if parent_type == "variable_list" then
+		return true
+	end
 
-       -- Language-specific name heuristics.
-       local current = node
-       while parent do
-               local ptype = parent:type()
-               if (ptype == "function_declaration" or ptype == "function_definition" or ptype == "class_definition" or ptype == "class_declaration")
-                       and M.node_in_field(parent, "name", current)
-               then
-                       return true
-               end
-               if ptype == "field" then
-                       return true
-               end
-               current = parent
-               parent = parent:parent()
-       end
+	-- Language-specific name heuristics.
+	local current = node
+	while parent do
+		local ptype = parent:type()
+		if (ptype == "function_declaration" or ptype == "function_definition" or ptype == "class_definition" or ptype == "class_declaration")
+			and M.node_in_field(parent, "name", current)
+		then
+			return true
+		end
+		if (ptype == "class_specifier" or ptype == "struct_specifier" or ptype == "enum_specifier" or ptype == "union_specifier")
+			and (M.node_in_field(parent, "name", current) or M.node_in_field(parent, "tag", current))
+		then
+			return true
+		end
+		if ptype == "function_declarator" then
+			return true
+		end
+		if ptype == "init_declarator" and M.node_in_field(parent, "declarator", current) then
+			return true
+		end
+		if ptype == "field_declaration" and M.node_in_field(parent, "declarator", current) then
+			return true
+		end
+		if ptype == "declarator" then
+			return true
+		end
+		if ptype == "field" then
+			return true
+		end
+		current = parent
+		parent = parent:parent()
+	end
 
-       return false
+	return false
 end
 
 function M.is_value_node(node, text)
@@ -130,10 +150,13 @@ function M.is_value_node(node, text)
 	if node_type:find("string") or node_type:find("number") or node_type:find("integer") or node_type:find("float") or node_type:find("boolean") then
 		return true
 	end
-       if text then
-               if text:match("^%s*['\"].*['\"]%s*$") then
-                       return true
-               end
+	if node_type == "char_literal" or node_type:find("char") and node_type:find("literal") then
+		return true
+	end
+	if text then
+		if text:match("^%s*['\"].*['\"]%s*$") then
+			return true
+		end
 		if text:match("^%s*[%d%.]+%s*$") then
 			return true
 		end
