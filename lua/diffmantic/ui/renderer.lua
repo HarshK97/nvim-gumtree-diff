@@ -69,6 +69,8 @@ function M.render(src_buf, dst_buf, actions, ns)
 
 			local leaf_changes = helpers.find_leaf_changes(node, target, src_buf, dst_buf)
 
+			local signs_src = {}
+			local signs_dst = {}
 			if #leaf_changes > 0 then
 				local rename_signs = {}
 				local rename_signs_src = {}
@@ -97,7 +99,12 @@ function M.render(src_buf, dst_buf, actions, ns)
 					if not (helpers.is_rename_identifier(src_node) or helpers.is_rename_identifier(dst_node)) then
 						local src_type = src_node:type()
 						local dst_type = dst_node:type()
-						if (src_type == "identifier" or src_type == "field_identifier" or src_type == "type_identifier")
+						if
+							(
+								src_type == "identifier"
+								or src_type == "field_identifier"
+								or src_type == "type_identifier"
+							)
 							and (dst_type == "identifier" or dst_type == "field_identifier" or dst_type == "type_identifier")
 							and rename_pairs[change.src_text] == change.dst_text
 						then
@@ -248,42 +255,16 @@ function M.render(src_buf, dst_buf, actions, ns)
 				end
 
 				if has_other_changes then
-					local did_line_diff = helpers.highlight_internal_diff(node, target, src_buf, dst_buf, ns)
-					if not did_line_diff then
-						pcall(vim.api.nvim_buf_set_extmark, src_buf, ns, sr, sc, {
-							end_row = er,
-							end_col = ec,
-							hl_group = "DiffChange",
-							sign_text = "U",
-							sign_hl_group = "DiffChange",
-						})
-						pcall(vim.api.nvim_buf_set_extmark, dst_buf, ns, tr, tc, {
-							end_row = ter,
-							end_col = tec,
-							hl_group = "DiffChange",
-							sign_text = "U",
-							sign_hl_group = "DiffChange",
-						})
-					end
+					helpers.highlight_internal_diff(node, target, src_buf, dst_buf, ns, {
+						signs_src = signs_src,
+						signs_dst = signs_dst,
+					})
 				end
 			else
-				local did_line_diff = helpers.highlight_internal_diff(node, target, src_buf, dst_buf, ns)
-				if not did_line_diff then
-					pcall(vim.api.nvim_buf_set_extmark, src_buf, ns, sr, sc, {
-						end_row = er,
-						end_col = ec,
-						hl_group = "DiffChange",
-						sign_text = "U",
-						sign_hl_group = "DiffChange",
-					})
-					pcall(vim.api.nvim_buf_set_extmark, dst_buf, ns, tr, tc, {
-						end_row = ter,
-						end_col = tec,
-						hl_group = "DiffChange",
-						sign_text = "U",
-						sign_hl_group = "DiffChange",
-					})
-				end
+				helpers.highlight_internal_diff(node, target, src_buf, dst_buf, ns, {
+					signs_src = signs_src,
+					signs_dst = signs_dst,
+				})
 			end
 		elseif action.type == "delete" then
 			if is_suppressed(src_suppress, node) and node:type() ~= "field_declaration" then

@@ -236,7 +236,7 @@ function M.set_inline_virt_text(buf, ns, row, col, text, hl)
 	pcall(vim.api.nvim_buf_set_extmark, buf, ns, row, col, opts)
 end
 
-function M.highlight_internal_diff(src_node, dst_node, src_buf, dst_buf, ns)
+function M.highlight_internal_diff(src_node, dst_node, src_buf, dst_buf, ns, opts)
 	local src_text = vim.treesitter.get_node_text(src_node, src_buf)
 	local dst_text = vim.treesitter.get_node_text(dst_node, dst_buf)
 	if not src_text or not dst_text or src_text == "" or dst_text == "" then
@@ -246,122 +246,151 @@ function M.highlight_internal_diff(src_node, dst_node, src_buf, dst_buf, ns)
 	local src_lines = vim.split(src_text, "\n", { plain = true })
 	local dst_lines = vim.split(dst_text, "\n", { plain = true })
 
-	local function is_comment_only(line)
-		local trimmed = (line or ""):match("^%s*(.-)%s*$")
-		if trimmed == "" then
-			return true
-		end
-		if trimmed:match("^%-%-") or trimmed:match("^#") or trimmed:match("^//") then
-			return true
-		end
-		return false
-	end
-
 	local ok, hunks = pcall(vim.text.diff, src_text, dst_text, {
 		result_type = "indices",
 		linematch = 60,
 	})
-	if not ok or not hunks or #hunks == 0 then
-		return false
-	end
 
 	local sr, _, er, _ = src_node:range()
 	local tr, _, ter, _ = dst_node:range()
 	local src_end = er - 1
 	local dst_end = ter - 1
+	local signs_src = opts and opts.signs_src or nil
+	local signs_dst = opts and opts.signs_dst or nil
 
-	for _, h in ipairs(hunks) do
-		local start_a, count_a, start_b, count_b = h[1], h[2], h[3], h[4]
+	local function mark_fragment(buf, row, start_col, end_col, hl_group)
+		if row < 0 or end_col <= start_col then
+			return false
+		end
+		return pcall(vim.api.nvim_buf_set_extmark, buf, ns, row, start_col, {
+			end_row = row,
+			end_col = end_col,
+			hl_group = hl_group,
+		})
+	end
 
-		if count_a > 0 then
-			local row_start = sr + start_a - 1
-			local row_end = math.min(row_start + count_a - 1, src_end)
-			if row_end >= row_start then
-				pcall(vim.api.nvim_buf_set_extmark, src_buf, ns, row_start, 0, {
-					end_row = row_end + 1,
-					end_col = 0,
-					hl_group = (count_b > 0) and "DiffChange" or "DiffDelete",
-					hl_eol = true,
-				})
+	local function mark_sign(buf, row, text, hl_group, sign_rows)
+		if row < 0 then
+			return false
+		end
+		if sign_rows and sign_rows[row] then
+			return false
+		end
+		local ok = pcall(vim.api.nvim_buf_set_extmark, buf, ns, row, 0, {
+			sign_text = text,
+			sign_hl_group = hl_group,
+		})
+		if ok and sign_rows then
+			sign_rows[row] = true
+		end
+		return ok
+	end
+
+	local function mark_full_line(buf, row, hl_group)
+		if row < 0 then
+			return false
+		end
+		return pcall(vim.api.nvim_buf_set_extmark, buf, ns, row, 0, {
+			end_row = row + 1,
+			end_col = 0,
+			hl_group = hl_group,
+			hl_eol = true,
+		})
+	end
+
+	local function highlight_line_pair(src_row, dst_row, s_line, d_line)
+		if s_line and d_line and s_line ~= d_line then
+			local fragment = M.diff_fragment(s_line, d_line)
+			if fragment then
+				local did = false
+				if src_row <= src_end then
+					did = mark_fragment(src_buf, src_row, fragment.old_start - 1, fragment.old_end, "DiffChangeText") or did
+					mark_sign(src_buf, src_row, "U", "DiffChangeText", signs_src)
+				end
+				if dst_row <= dst_end then
+					did = mark_fragment(dst_buf, dst_row, fragment.new_start - 1, fragment.new_end, "DiffChangeText") or did
+					mark_sign(dst_buf, dst_row, "U", "DiffChangeText", signs_dst)
+				end
+				return did
+			end
+			local did = false
+			if src_row <= src_end then
+				did = mark_full_line(src_buf, src_row, "DiffChangeText") or did
+				mark_sign(src_buf, src_row, "U", "DiffChangeText", signs_src)
+			end
+			if dst_row <= dst_end then
+				did = mark_full_line(dst_buf, dst_row, "DiffChangeText") or did
+				mark_sign(dst_buf, dst_row, "U", "DiffChangeText", signs_dst)
+			end
+			return did
+		end
+		if s_line and not d_line then
+			if src_row <= src_end then
+				mark_sign(src_buf, src_row, "-", "DiffDeleteText", signs_src)
+				return mark_full_line(src_buf, src_row, "DiffDeleteText")
+			end
+		elseif d_line and not s_line then
+			if dst_row <= dst_end then
+				mark_sign(dst_buf, dst_row, "+", "DiffAddText", signs_dst)
+				return mark_full_line(dst_buf, dst_row, "DiffAddText")
 			end
 		end
+		return false
+	end
 
-		if count_b > 0 then
-			local row_start = tr + start_b - 1
-			local row_end = math.min(row_start + count_b - 1, dst_end)
-			if row_end >= row_start then
-				pcall(vim.api.nvim_buf_set_extmark, dst_buf, ns, row_start, 0, {
-					end_row = row_end + 1,
-					end_col = 0,
-					hl_group = (count_a > 0) and "DiffChange" or "DiffAdd",
-					hl_eol = true,
-				})
-			end
-		end
+	local did_highlight = false
 
-		-- Preserve delete/add visibility when comment-only lines differ.
-		if count_a > 0 and count_b > 0 and count_a == count_b then
-			for i = 0, count_a - 1 do
+	if ok and hunks and #hunks > 0 then
+		for _, h in ipairs(hunks) do
+			local start_a, count_a, start_b, count_b = h[1], h[2], h[3], h[4]
+			local overlap = math.min(count_a, count_b)
+
+			for i = 0, overlap - 1 do
+				local src_row = sr + start_a - 1 + i
+				local dst_row = tr + start_b - 1 + i
 				local s_line = src_lines[start_a + i]
 				local d_line = dst_lines[start_b + i]
-				if s_line and d_line then
-					if not is_comment_only(s_line) and is_comment_only(d_line) then
-						local row_start = sr + start_a - 1 + i
-						if row_start <= src_end then
-							pcall(vim.api.nvim_buf_set_extmark, src_buf, ns, row_start, 0, {
-								end_row = row_start + 1,
-								end_col = 0,
-								hl_group = "DiffDelete",
-								hl_eol = true,
-								priority = 5000,
-							})
-						end
-					elseif is_comment_only(s_line) and not is_comment_only(d_line) then
-						local row_start = tr + start_b - 1 + i
-						if row_start <= dst_end then
-							pcall(vim.api.nvim_buf_set_extmark, dst_buf, ns, row_start, 0, {
-								end_row = row_start + 1,
-								end_col = 0,
-								hl_group = "DiffAdd",
-								hl_eol = true,
-								priority = 5000,
-							})
-						end
+				if highlight_line_pair(src_row, dst_row, s_line, d_line) then
+					did_highlight = true
+				end
+			end
+
+			if count_a > overlap then
+				for i = overlap, count_a - 1 do
+					local src_row = sr + start_a - 1 + i
+					if src_row <= src_end then
+						mark_sign(src_buf, src_row, "-", "DiffDeleteText", signs_src)
+						did_highlight = mark_full_line(src_buf, src_row, "DiffDeleteText") or did_highlight
+					end
+				end
+			end
+
+			if count_b > overlap then
+				for i = overlap, count_b - 1 do
+					local dst_row = tr + start_b - 1 + i
+					if dst_row <= dst_end then
+						mark_sign(dst_buf, dst_row, "+", "DiffAddText", signs_dst)
+						did_highlight = mark_full_line(dst_buf, dst_row, "DiffAddText") or did_highlight
 					end
 				end
 			end
 		end
 
-		if count_a > count_b then
-			local extra = count_a - count_b
-			local row_start = sr + start_a - 1 + (count_a - extra)
-			local row_end = math.min(row_start + extra - 1, src_end)
-			if row_end >= row_start then
-				pcall(vim.api.nvim_buf_set_extmark, src_buf, ns, row_start, 0, {
-					end_row = row_end + 1,
-					end_col = 0,
-					hl_group = "DiffDelete",
-					hl_eol = true,
-					priority = 5000,
-				})
-			end
-		elseif count_b > count_a then
-			local extra = count_b - count_a
-			local row_start = tr + start_b - 1 + (count_b - extra)
-			local row_end = math.min(row_start + extra - 1, dst_end)
-			if row_end >= row_start then
-				pcall(vim.api.nvim_buf_set_extmark, dst_buf, ns, row_start, 0, {
-					end_row = row_end + 1,
-					end_col = 0,
-					hl_group = "DiffAdd",
-					hl_eol = true,
-					priority = 5000,
-				})
-			end
+		return did_highlight
+	end
+
+	local max_lines = math.max(#src_lines, #dst_lines)
+	for i = 1, max_lines do
+		local src_row = sr + i - 1
+		local dst_row = tr + i - 1
+		local s_line = src_lines[i]
+		local d_line = dst_lines[i]
+		if highlight_line_pair(src_row, dst_row, s_line, d_line) then
+			did_highlight = true
 		end
 	end
 
-	return true
+	return did_highlight
 end
 
 return M
