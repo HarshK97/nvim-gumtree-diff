@@ -3,7 +3,21 @@ local core = require("diffmantic.core")
 local ui = require("diffmantic.ui")
 local debug_utils = require("diffmantic.debug_utils")
 
-function M.setup(opts) end
+local function setup_highlights()
+	local add_fg = vim.api.nvim_get_hl(0, { name = "DiffAdd" }).fg or 0xa6e3a1
+	local delete_fg = vim.api.nvim_get_hl(0, { name = "DiffDelete" }).fg or 0xf38ba8
+	local change_fg = vim.api.nvim_get_hl(0, { name = "DiffChange" }).fg or 0xf9e2af
+
+	vim.api.nvim_set_hl(0, "DiffAddText", { fg = add_fg, bg = "NONE", ctermbg = "NONE" })
+	vim.api.nvim_set_hl(0, "DiffDeleteText", { fg = delete_fg, bg = "NONE", ctermbg = "NONE" })
+	vim.api.nvim_set_hl(0, "DiffChangeText", { fg = change_fg, bg = "NONE", ctermbg = "NONE" })
+	vim.api.nvim_set_hl(0, "DiffMoveText", { fg = 0x89b4fa, bg = "NONE", ctermbg = "NONE" })
+	vim.api.nvim_set_hl(0, "DiffRenameText", { fg = change_fg, bg = "NONE", ctermbg = "NONE", underline = true })
+end
+
+function M.setup(opts)
+	setup_highlights()
+end
 
 function M.diff(args)
 	local parts = vim.split(args, " ", { trimempty = true })
@@ -78,7 +92,5 @@ function M.diff(args)
 	-- debug_utils.print_mappings(mappings, src_info, dst_info, buf1, buf2)
 	ui.apply_highlights(buf1, buf2, actions)
 end
-
-
 
 return M

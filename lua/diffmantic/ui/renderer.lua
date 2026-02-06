@@ -48,20 +48,20 @@ function M.render(src_buf, dst_buf, actions, ns)
 			pcall(vim.api.nvim_buf_set_extmark, src_buf, ns, sr, sc, {
 				end_row = er,
 				end_col = ec,
-				hl_group = "DiffText",
+				hl_group = "DiffMoveText",
 				virt_text = { { string.format(" ⤷ moved L%d → L%d", src_line, dst_line), "Comment" } },
 				virt_text_pos = "eol",
 				sign_text = "M",
-				sign_hl_group = "DiffText",
+				sign_hl_group = "DiffMoveText",
 			})
 			pcall(vim.api.nvim_buf_set_extmark, dst_buf, ns, tr, tc, {
 				end_row = ter,
 				end_col = tec,
-				hl_group = "DiffText",
+				hl_group = "DiffMoveText",
 				virt_text = { { string.format(" ⤶ from L%d", src_line), "Comment" } },
 				virt_text_pos = "eol",
 				sign_text = "M",
-				sign_hl_group = "DiffText",
+				sign_hl_group = "DiffMoveText",
 			})
 		elseif action.type == "update" then
 			local target = action.target
@@ -114,35 +114,38 @@ function M.render(src_buf, dst_buf, actions, ns)
 						-- Rename: highlight identifier with inline "was"/"renamed to".
 						if not rename_signs_src[csr] then
 							rename_signs_src[csr] = true
+							signs_src[csr] = true
 							pcall(vim.api.nvim_buf_set_extmark, src_buf, ns, csr, csc, {
 								end_row = cser,
 								end_col = csec,
-								hl_group = "DiffChange",
+								hl_group = "DiffRenameText",
 								sign_text = "R",
-								sign_hl_group = "DiffChange",
+								sign_hl_group = "DiffRenameText",
 							})
 						else
 							pcall(vim.api.nvim_buf_set_extmark, src_buf, ns, csr, csc, {
 								end_row = cser,
 								end_col = csec,
-								hl_group = "DiffChange",
+								hl_group = "DiffChangeText",
 							})
 						end
 
 						if not rename_signs[ctr] then
 							rename_signs[ctr] = true
+							signs_dst[ctr] = true
 							pcall(vim.api.nvim_buf_set_extmark, dst_buf, ns, ctr, ctc, {
 								end_row = cter,
 								end_col = ctec,
-								hl_group = "DiffChange",
+								hl_group = "DiffRenameText",
 								sign_text = "R",
-								sign_hl_group = "DiffChange",
+								sign_hl_group = "DiffRenameText",
 							})
 						else
+							signs_dst[ctr] = true
 							pcall(vim.api.nvim_buf_set_extmark, dst_buf, ns, ctr, ctc, {
 								end_row = cter,
 								end_col = ctec,
-								hl_group = "DiffChange",
+								hl_group = "DiffChangeText",
 							})
 						end
 						local src_key = tostring(src_node:id())
@@ -169,8 +172,10 @@ function M.render(src_buf, dst_buf, actions, ns)
 								"Comment"
 							)
 						end
-					elseif helpers.is_value_node(src_node, change.src_text)
-						or helpers.is_value_node(dst_node, change.dst_text) then
+					elseif
+						helpers.is_value_node(src_node, change.src_text)
+						or helpers.is_value_node(dst_node, change.dst_text)
+					then
 						-- Value change: micro-diff only (no virtual text).
 						local fragment = helpers.diff_fragment(change.src_text, change.dst_text)
 						if fragment then
@@ -193,16 +198,18 @@ function M.render(src_buf, dst_buf, actions, ns)
 
 							if not update_signs_dst[ctr] then
 								update_signs_dst[ctr] = true
+								signs_dst[ctr] = true
 								pcall(vim.api.nvim_buf_set_extmark, dst_buf, ns, ctr, ctc + rel_end, {
 									sign_text = "U",
-									sign_hl_group = "DiffChange",
+									sign_hl_group = "DiffChangeText",
 								})
 							end
 							if not update_signs_src[csr] then
 								update_signs_src[csr] = true
+								signs_src[csr] = true
 								pcall(vim.api.nvim_buf_set_extmark, src_buf, ns, csr, csc + fragment.old_end, {
 									sign_text = "U",
-									sign_hl_group = "DiffChange",
+									sign_hl_group = "DiffChangeText",
 								})
 							end
 						else
@@ -211,17 +218,18 @@ function M.render(src_buf, dst_buf, actions, ns)
 								end_col = ctec,
 								hl_group = "DiffChange",
 								sign_text = "U",
-								sign_hl_group = "DiffChange",
+								sign_hl_group = "DiffChangeText",
 							})
 							if cser == csr then
 								if not update_signs_src[csr] then
 									update_signs_src[csr] = true
+									signs_src[csr] = true
 									pcall(vim.api.nvim_buf_set_extmark, src_buf, ns, csr, csc, {
 										end_row = cser,
 										end_col = csec,
 										hl_group = "DiffChange",
 										sign_text = "U",
-										sign_hl_group = "DiffChange",
+										sign_hl_group = "DiffChangeText",
 									})
 								else
 									pcall(vim.api.nvim_buf_set_extmark, src_buf, ns, csr, csc, {
@@ -284,9 +292,9 @@ function M.render(src_buf, dst_buf, actions, ns)
 			pcall(vim.api.nvim_buf_set_extmark, src_buf, ns, sr, sc, {
 				end_row = er,
 				end_col = ec,
-				hl_group = "DiffDelete",
+				hl_group = "DiffDeleteText",
 				sign_text = "-",
-				sign_hl_group = "DiffDelete",
+				sign_hl_group = "DiffDeleteText",
 			})
 		elseif action.type == "insert" then
 			if is_suppressed(dst_suppress, node) and node:type() ~= "field_declaration" then
@@ -295,9 +303,9 @@ function M.render(src_buf, dst_buf, actions, ns)
 			pcall(vim.api.nvim_buf_set_extmark, dst_buf, ns, sr, sc, {
 				end_row = er,
 				end_col = ec,
-				hl_group = "DiffAdd",
+				hl_group = "DiffAddText",
 				sign_text = "+",
-				sign_hl_group = "DiffAdd",
+				sign_hl_group = "DiffAddText",
 			})
 		end
 
