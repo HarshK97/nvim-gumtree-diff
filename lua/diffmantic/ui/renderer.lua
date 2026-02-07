@@ -136,7 +136,7 @@ function M.render(src_buf, dst_buf, actions, ns)
 					end
 
 					if helpers.is_rename_identifier(src_node) or helpers.is_rename_identifier(dst_node) then
-						-- Rename: highlight identifier with inline "was"/"renamed to".
+						-- Rename: highlight identifier with inline "was"/"->".
 						if not rename_signs_src[csr] then
 							rename_signs_src[csr] = true
 							signs_src[csr] = true
@@ -176,14 +176,7 @@ function M.render(src_buf, dst_buf, actions, ns)
 						local src_key = tostring(src_node:id())
 						if not rename_inline_src[src_key] then
 							rename_inline_src[src_key] = true
-							helpers.set_inline_virt_text(
-								src_buf,
-								ns,
-								csr,
-								csec,
-								" renamed to " .. change.dst_text,
-								"Comment"
-							)
+							helpers.set_inline_virt_text(src_buf, ns, csr, csec, " -> " .. change.dst_text, "Comment")
 						end
 						local dst_key = tostring(dst_node:id())
 						if not rename_inline_dst[dst_key] then
