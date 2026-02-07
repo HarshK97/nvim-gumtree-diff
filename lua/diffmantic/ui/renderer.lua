@@ -6,6 +6,7 @@ function M.render(src_buf, dst_buf, actions, ns)
 	-- Suppress insert/delete inside moved/updated ranges.
 	local src_suppress = {}
 	local dst_suppress = {}
+	local rename_map = {}
 
 	local function add_range(ranges, node)
 		if not node then
@@ -19,6 +20,17 @@ function M.render(src_buf, dst_buf, actions, ns)
 		if action.type == "move" or action.type == "update" then
 			add_range(src_suppress, action.node)
 			add_range(dst_suppress, action.target)
+		end
+	end
+
+	for _, action in ipairs(actions) do
+		if action.type == "update" then
+			local leaf_changes = helpers.find_leaf_changes(action.node, action.target, src_buf, dst_buf)
+			for _, change in ipairs(leaf_changes) do
+				if helpers.is_rename_identifier(change.src_node) or helpers.is_rename_identifier(change.dst_node) then
+					rename_map[change.src_text] = change.dst_text
+				end
+			end
 		end
 	end
 
@@ -78,8 +90,11 @@ function M.render(src_buf, dst_buf, actions, ns)
 				local rename_inline_dst = {}
 				local update_signs_dst = {}
 				local update_signs_src = {}
-				local has_other_changes = false
 				local rename_pairs = {}
+
+				for src_text, dst_text in pairs(rename_map) do
+					rename_pairs[src_text] = dst_text
+				end
 
 				for _, change in ipairs(leaf_changes) do
 					local src_node = change.src_node
@@ -106,7 +121,10 @@ function M.render(src_buf, dst_buf, actions, ns)
 								or src_type == "type_identifier"
 							)
 							and (dst_type == "identifier" or dst_type == "field_identifier" or dst_type == "type_identifier")
-							and rename_pairs[change.src_text] == change.dst_text
+							and (
+								rename_pairs[change.src_text] == change.dst_text
+								or rename_map[change.src_text] == change.dst_text
+							)
 						then
 							is_rename_ref = true
 						end
@@ -248,22 +266,45 @@ function M.render(src_buf, dst_buf, actions, ns)
 							end
 						end
 					else
-						has_other_changes = true
+						if cser >= csr then
+							pcall(vim.api.nvim_buf_set_extmark, src_buf, ns, csr, csc, {
+								end_row = cser,
+								end_col = csec,
+								hl_group = "DiffChangeText",
+							})
+						end
+						if cter >= ctr then
+							pcall(vim.api.nvim_buf_set_extmark, dst_buf, ns, ctr, ctc, {
+								end_row = cter,
+								end_col = ctec,
+								hl_group = "DiffChangeText",
+							})
+						end
+						if not update_signs_src[csr] then
+							update_signs_src[csr] = true
+							signs_src[csr] = true
+							pcall(vim.api.nvim_buf_set_extmark, src_buf, ns, csr, csc, {
+								sign_text = "U",
+								sign_hl_group = "DiffChangeText",
+							})
+						end
+						if not update_signs_dst[ctr] then
+							update_signs_dst[ctr] = true
+							signs_dst[ctr] = true
+							pcall(vim.api.nvim_buf_set_extmark, dst_buf, ns, ctr, ctc, {
+								sign_text = "U",
+								sign_hl_group = "DiffChangeText",
+							})
+						end
 					end
 
 					::continue_leaf::
-				end
-
-				if has_other_changes then
-					helpers.highlight_internal_diff(node, target, src_buf, dst_buf, ns, {
-						signs_src = signs_src,
-						signs_dst = signs_dst,
-					})
 				end
 			else
 				helpers.highlight_internal_diff(node, target, src_buf, dst_buf, ns, {
 					signs_src = signs_src,
 					signs_dst = signs_dst,
+					rename_map = rename_map,
 				})
 			end
 		elseif action.type == "delete" then
